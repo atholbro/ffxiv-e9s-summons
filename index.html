@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+	<meta charset="utf-8">
+
+	<title>E9S Clones</title>
+	
+	<script src="https://unpkg.com/konva@7.0.3/konva.min.js"></script>
+</head>
+
+<body>
+	<canvas id="map" height="450" width="450"></canvas>
+	<br /><br />
+	<b id="result"></b>
+	<br />
+	<button onClick="reset()">Reset</button>
+	
+	<script>
+		var debug = false
+		var canvas = document.getElementById("map")
+		var ctx = canvas.getContext('2d')
+		var atk = null
+		
+		var qp = Math.PI / 4
+		var size = 450
+		var hc = size / 2
+		var cr = 15
+		var clonePositions = [
+			[cr, cr, qp * 7], [hc, cr, qp * 6] , [size - cr, cr, qp * 5],
+			[cr, hc, 0], [size - cr, hc, qp * 4],
+			[cr, size - cr, qp], [hc, size - cr, qp * 2], [size - cr, size - cr, qp * 3]
+		]
+		var selectedSlice = null
+		var expired = false
+		var timer = null
+		
+		const ed = {
+			'0.3926991': 'ENE',
+			'1.178097': 'NNE',
+			'1.9634954': 'NNW',
+			'2.7488936': 'WNW',
+			'3.5342917': 'WSW',
+			'4.3196899': 'SSW',
+			'5.1050881': 'SSE',
+			'5.8904862': 'ESE'
+		}
+		const targets = [
+			[0, qp, 'ENE', [0, 0], [hc, 0], [hc, -hc]],
+			[qp, qp * 2, 'NNE', [0, 0], [0, -hc], [hc, -hc]],
+			[qp * 2, qp * 3, 'NNW', [0,0], [0, -hc], [-hc, -hc]],
+			[qp * 3, qp * 4, 'WNW', [0,0], [-hc, 0], [-hc, -hc]],
+			[qp * 4, qp * 5, 'WSW', [0,0], [-hc, 0], [-hc, hc]],
+			[qp * 5, qp * 6, 'SSW', [0,0], [-hc, hc], [0, hc]],
+			[qp * 6, qp * 7, 'SSE', [0,0], [0, hc], [hc, hc]],
+			[qp * 7, qp * 8, 'ESE', [0,0], [hc, 0], [hc, hc]]
+		]
+	
+		function rand(max) {
+			return Math.floor(Math.random() * Math.floor(max))
+		}
+	
+		function generateAttack() {
+			var result = { }
+		
+			do {
+				var possibleLocations = clonePositions.slice()
+
+				result.side = rand(2) // -1 = left / 1 = right (see below)
+				if (result.side == 0) { result.side = -1 }
+				
+				result.rot = rand(8) * qp
+				
+				var pos = rand(8)
+				result.clone1 = possibleLocations[pos]
+				possibleLocations.splice(pos, 1)
+				pos = rand(7)
+				result.clone2 = possibleLocations[pos]
+				result.goodZones = calcSolution(result)
+			} while (result.goodZones.length != 1)
+			
+			return result
+		}
+	
+		function drawBoss(ctx, atk) {
+			ctx.lineWidth = 4
+			ctx.strokeStyle = 'red'
+			ctx.beginPath()
+			ctx.translate(hc, hc)
+			ctx.rotate(-atk.rot)
+			ctx.arc(0, 0, 30, qp * 5, qp * 3)
+			ctx.stroke()
+			
+			ctx.beginPath()
+			ctx.moveTo(40, 0)
+			ctx.lineTo(20, 0)
+			ctx.stroke()
+			ctx.rotate(atk.rot)
+			ctx.translate(-hc, -hc)
+			
+			drawBossOrb(ctx, atk)
+		}
+		
+		function drawBossOrb(ctx, atk) {
+			ctx.fillStyle = '#00FF00'
+			ctx.translate(hc, hc)
+			ctx.rotate(-atk.rot)
+			ctx.beginPath()
+			ctx.arc(0, 40 * atk.side, 5, 0, Math.PI * 2)
+			ctx.fill()
+			ctx.rotate(atk.rot)
+			ctx.translate(-hc, -hc)
+		}
+		
+		function drawBossAttack(ctx, atk) {
+			ctx.fillStyle = '#FF00A060'
+			ctx.translate(hc, hc)
+			ctx.rotate(-atk.rot)
+			ctx.fillRect(-hc * 2, 0, size * 2, size * atk.side)
+			ctx.rotate(atk.rot)
+			ctx.translate(-hc, -hc)
+		}
+		
+		function drawClone(ctx, atk, clone, style) {
+			ctx.fillStyle = style
+			ctx.translate(clone[0], clone[1])
+			
+			ctx.beginPath()
+			ctx.arc(0, 0, cr, 0, Math.PI * 2)
+			ctx.fill()
+			
+			if (debug) {
+				ctx.rotate(-clone[2])
+				ctx.beginPath()
+				ctx.arc(cr + 3, 0, 5, 0, Math.PI * 2)
+				ctx.fill()
+				ctx.rotate(clone[2])
+			}
+			
+			ctx.translate(-clone[0], -clone[1])
+		}
+		
+		function drawCloneAttack(ctx, atk, clone) {
+			ctx.fillStyle = '#FF00FF60'
+			ctx.translate(clone[0], clone[1])
+			ctx.rotate(-clone[2])
+			ctx.fillRect(0, 0, size * 2, size * atk.side)
+			ctx.rotate(clone[2])
+			ctx.translate(-clone[0], -clone[1])
+		}
+		
+		function drawSlice(ctx, slice, style) {
+			ctx.strokeStyle = style
+			ctx.translate(hc, hc)
+			ctx.beginPath()
+			ctx.moveTo(slice[3][0], slice[3][1])
+			ctx.lineTo(slice[4][0], slice[4][1])
+			ctx.lineTo(slice[5][0], slice[5][1])
+			ctx.lineTo(slice[3][0], slice[3][1])
+			ctx.stroke()
+			ctx.translate(-hc, -hc)
+		}
+		
+		function draw(ctx, atk) {
+			ctx.clearRect(0, 0, size, size)
+		
+			ctx.fillStyle = '#000000';
+			ctx.fillRect(25, 25, 400, 400)
+		
+			drawBoss(ctx, atk)
+			drawClone(ctx, atk, atk.clone1, '#FFFF00')
+			drawClone(ctx, atk, atk.clone2, '#FFFF00')
+			
+			if (selectedSlice) {
+				drawSlice(ctx, selectedSlice, '#00FF0060')
+			}
+			
+			if (expired) {
+				drawBossAttack(ctx, atk)
+				drawCloneAttack(ctx, atk, atk.clone1)
+				drawCloneAttack(ctx, atk, atk.clone2)
+			}
+		}
+		
+		function clampRadians(rad) {
+			var result = rad
+			if (result > Math.PI * 2) { result -= Math.PI * 2 }
+			if (result == Math.PI * 2) { result = 0 }
+			if (debug) { console.log(rad + " clamp to " + result) }
+			return result
+		}
+		
+		function calcBadZones(rotStart, direction, badZones) {
+			var rotEnd = 0
+			if (direction > 0) {
+				rotStart = clampRadians(rotStart)
+				rotEnd = clampRadians(rotStart + Math.PI)
+			} else {
+				var temp = rotStart
+				rotStart = clampRadians(temp + Math.PI)
+				rotEnd = clampRadians(temp)
+			}
+			
+			if (debug) { console.log(rotStart , rotEnd) }
+			
+			for (const [k, v] of Object.entries(ed)) {
+				if (rotStart < rotEnd) {
+					if ((k >= 0 && k <= rotStart) || (k >= rotEnd && k <= Math.PI * 2)) {
+						badZones.add(v)
+					}
+				} else {
+					if (k >= rotEnd && k <= rotStart) {
+						badZones.add(v)
+					}
+				}
+			}
+		}
+		
+		function calcSolution(atk) {
+			var badZones = new Set()
+			calcBadZones(atk.rot, atk.side, badZones)
+			calcBadZones(atk.clone1[2], atk.side, badZones)
+			calcBadZones(atk.clone2[2], atk.side, badZones)
+			if (debug) { console.log(badZones) }
+			
+			var goodZones = []
+			for (const [k, v] of Object.entries(ed)) {
+				if (!badZones.has(v)) {
+					goodZones.push(v)
+				}
+			}
+			
+			if (debug) { console.log(goodZones) }
+			return goodZones
+		}
+		
+		function findEventTarget(e) {
+			var ex = e.offsetX / hc - 1
+			var ey = -(e.offsetY / hc - 1)
+		
+			var rot = clampRadians(-Math.atan2(ex, ey) + qp * 2 + Math.PI * 2)
+			
+			var target = null
+			targets.forEach(t => {
+				if (rot >= t[0]  && rot <= t[1]) {
+					target = t
+				}
+			})
+			
+			return target
+		}
+		
+		function reset() {
+			if (timer != null) {
+				clearTimeout(timer)
+				timer = null
+			}
+			
+			selectedSlice = null
+			expired = false
+			document.getElementById("result").textContent = ""
+			
+			atk = generateAttack()
+			if (debug) { console.log(atk) }
+			
+			draw(ctx, atk)
+			
+			setTimeout(function() {
+				expired = true
+				timer = null
+				draw(ctx, atk)
+				
+				var result = document.getElementById("result")
+				if (selectedSlice == null || selectedSlice[2] != atk.goodZones[0]) {
+					result.textContent = "DEAD"
+				} else {
+					result.textContent = "ALIVE"
+				}
+			}, 10000)
+		}
+
+		canvas.addEventListener('mousemove', e => {
+			var target = findEventTarget(e)
+			if (target && !expired) {
+				draw(ctx, atk)
+				drawSlice(ctx, target, '#FFFFFF40')
+			}
+		})
+		
+		canvas.addEventListener('mouseup', e => {
+			selectedSlice = findEventTarget(e)
+			if (selectedSlice) {
+				draw(ctx, atk)
+			}
+		})
+		
+		reset()
+	</script>
+</body>
+
+</html>
